@@ -13,6 +13,13 @@
 'use strict';
 
 import type ContentBlock from 'ContentBlock';
+import type ContentState from 'ContentState';
+
+export type DraftDecoratorStrategy = (
+  block: ContentBlock,
+  callback: (start: number, end: number) => void,
+  contentState: ContentState,
+) => void;
 
 /**
  * A DraftDecorator is a strategy-component pair intended for use when
@@ -30,10 +37,7 @@ import type ContentBlock from 'ContentBlock';
  *   - "props": Props to be passed into the React component that will be used.
  */
 export type DraftDecorator = {
-  strategy: (
-    block: ContentBlock,
-    callback: (start: number, end: number) => void
-  ) => void,
+  strategy: DraftDecoratorStrategy,
   component: Function,
   props?: Object,
 };

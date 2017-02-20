@@ -14,6 +14,7 @@
 'use strict';
 
 const ContentBlock = require('ContentBlock');
+const ContentState = require('ContentState');
 const DraftEditorLeaf = require('DraftEditorLeaf.react');
 const DraftOffsetKey = require('DraftOffsetKey');
 const React = require('React');
@@ -37,6 +38,7 @@ import type {List} from 'immutable';
 const SCROLL_BUFFER = 10;
 
 type Props = {
+  contentState: ContentState,
   block: ContentBlock,
   customStyleMap: Object,
   customStyleFn: Function,
@@ -138,7 +140,7 @@ class DraftEditorBlock extends React.Component {
           <DraftEditorLeaf
             key={offsetKey}
             offsetKey={offsetKey}
-            blockKey={blockKey}
+            block={block}
             start={start}
             selection={hasSelection ? this.props.selection : undefined}
             forceSelection={this.props.forceSelection}
@@ -184,6 +186,7 @@ class DraftEditorBlock extends React.Component {
       return (
         <DecoratorComponent
           {...decoratorProps}
+          contentState={this.props.contentState}
           decoratedText={decoratedText}
           dir={dir}
           key={decoratorOffsetKey}

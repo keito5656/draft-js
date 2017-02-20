@@ -13,7 +13,6 @@
 
 'use strict';
 
-const DraftEntity = require('DraftEntity');
 const DraftModifier = require('DraftModifier');
 const EditorState = require('EditorState');
 const SelectionState = require('SelectionState');
@@ -31,13 +30,15 @@ const RichTextEditorUtil = {
     editorState: EditorState
   ): boolean {
     var selection = editorState.getSelection();
-    return editorState.getCurrentContent()
+    const contentState = editorState.getCurrentContent();
+    const entityMap = contentState.getEntityMap();
+    return contentState
       .getBlockForKey(selection.getAnchorKey())
       .getCharacterList()
       .slice(selection.getStartOffset(), selection.getEndOffset())
       .some(v => {
         var entity = v.getEntity();
-        return !!entity && DraftEntity.get(entity).getType() === 'LINK';
+        return !!entity && entityMap.__get(entity).getType() === 'LINK';
       });
   },
 
@@ -54,7 +55,7 @@ const RichTextEditorUtil = {
 
   handleKeyCommand: function(
     editorState: EditorState,
-    command: DraftEditorCommand
+    command: DraftEditorCommand | string,
   ): ?EditorState {
     switch (command) {
       case 'bold':
@@ -73,7 +74,7 @@ const RichTextEditorUtil = {
       case 'delete-word':
       case 'delete-to-end-of-block':
         return RichTextEditorUtil.onDelete(editorState);
-      default:
+      default: // they may have custom editor commands; ignore those
         return null;
     }
   },
@@ -119,26 +120,10 @@ const RichTextEditorUtil = {
     var blockBefore = content.getBlockBefore(startKey);
 
     if (blockBefore && blockBefore.getType() === 'atomic') {
-      var atomicBlockTarget = selection.merge({
-        anchorKey: blockBefore.getKey(),
-        anchorOffset: 0,
-      });
-      var asCurrentStyle = DraftModifier.setBlockType(
-        content,
-        atomicBlockTarget,
-        content.getBlockForKey(startKey).getType()
-      );
-      var withoutAtomicBlock = DraftModifier.removeRange(
-        asCurrentStyle,
-        atomicBlockTarget,
-        'backward'
-      );
+      const blockMap = content.getBlockMap().delete(blockBefore.getKey());
+      var withoutAtomicBlock = content.merge({blockMap, selectionAfter: selection});
       if (withoutAtomicBlock !== content) {
-        return EditorState.push(
-          editorState,
-          withoutAtomicBlock,
-          'remove-range'
-        );
+        return EditorState.push(editorState, withoutAtomicBlock, 'remove-range');
       }
     }
 

@@ -21,6 +21,7 @@ var SelectionState = require('SelectionState');
 import type {BlockMap} from 'BlockMap';
 import type {DraftDecoratorType} from 'DraftDecoratorType';
 import type {DraftInlineStyle} from 'DraftInlineStyle';
+import type {EntityMap} from 'EntityMap';
 import type {List, OrderedMap} from 'immutable';
 import type {EditorChangeType} from 'EditorChangeType';
 
@@ -68,7 +69,7 @@ class EditorState {
   _immutable: EditorStateRecord;
 
   static createEmpty(
-    decorator?: DraftDecoratorType
+    decorator?: ?DraftDecoratorType
   ): EditorState {
     return EditorState.createWithContent(
       ContentState.createFromText(''),
@@ -78,7 +79,7 @@ class EditorState {
 
   static createWithContent(
     contentState: ContentState,
-    decorator?: DraftDecoratorType
+    decorator?: ?DraftDecoratorType
   ): EditorState {
     var firstKey = contentState.getBlockMap().first().getKey();
     return EditorState.create({
@@ -119,6 +120,7 @@ class EditorState {
         var newTreeMap;
         if (decorator && existingDecorator) {
           newTreeMap = regenerateTreeForNewDecorator(
+            newContent,
             newContent.getBlockMap(),
             treeMap,
             decorator,
@@ -143,6 +145,7 @@ class EditorState {
           regenerateTreeForNewBlocks(
             editorState,
             newContent.getBlockMap(),
+            newContent.getEntityMap(),
             decorator
           )
         );
@@ -386,8 +389,10 @@ class EditorState {
 
     let inlineStyleOverride = editorState.getInlineStyleOverride();
 
-    // Don't discard inline style overrides on block type or depth changes.
-    if (changeType !== 'adjust-depth' && changeType !== 'change-block-type') {
+    // Don't discard inline style overrides for the following change types:
+    var overrideChangeTypes = ['adjust-depth', 'change-block-type', 'split-block'];
+
+    if (overrideChangeTypes.indexOf(changeType) === -1) {
       inlineStyleOverride = null;
     }
 
@@ -511,11 +516,11 @@ function updateSelection(
  */
 function generateNewTreeMap(
   contentState: ContentState,
-  decorator: ?DraftDecoratorType
+  decorator?: ?DraftDecoratorType
 ): OrderedMap<string, List<any>> {
   return contentState
     .getBlockMap()
-    .map(block => BlockTree.generate(block, decorator))
+    .map(block => BlockTree.generate(contentState, block, decorator))
     .toOrderedMap();
 }
 
@@ -527,15 +532,17 @@ function generateNewTreeMap(
 function regenerateTreeForNewBlocks(
   editorState: EditorState,
   newBlockMap: BlockMap,
-  decorator: ?DraftDecoratorType
+  newEntityMap: EntityMap,
+  decorator?: ?DraftDecoratorType
 ): OrderedMap<string, List<any>> {
-  var prevBlockMap = editorState.getCurrentContent().getBlockMap();
+  const contentState = editorState.getCurrentContent().set('entityMap', newEntityMap);
+  var prevBlockMap = contentState.getBlockMap();
   var prevTreeMap = editorState.getImmutable().get('treeMap');
   return prevTreeMap.merge(
     newBlockMap
       .toSeq()
       .filter((block, key) => block !== prevBlockMap.get(key))
-      .map(block => BlockTree.generate(block, decorator))
+      .map(block => BlockTree.generate(contentState, block, decorator)),
   );
 }
 
@@ -548,6 +555,7 @@ function regenerateTreeForNewBlocks(
  * List comparison.
  */
 function regenerateTreeForNewDecorator(
+  content: ContentState,
   blockMap: BlockMap,
   previousTreeMap: OrderedMap<string, List<any>>,
   decorator: DraftDecoratorType,
@@ -558,11 +566,11 @@ function regenerateTreeForNewDecorator(
       .toSeq()
       .filter(block => {
         return (
-          decorator.getDecorations(block) !==
-          existingDecorator.getDecorations(block)
+          decorator.getDecorations(block, content) !==
+          existingDecorator.getDecorations(block, content)
         );
       })
-      .map(block => BlockTree.generate(block, decorator))
+      .map(block => BlockTree.generate(content, block, decorator)),
   );
 }
 

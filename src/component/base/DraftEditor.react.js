@@ -9,6 +9,7 @@
  * @providesModule DraftEditor.react
  * @typechecks
  * @flow
+ * @preventMunge
  */
 
 'use strict';
@@ -36,7 +37,7 @@ const getScrollPosition = require('getScrollPosition');
 
 import type {BlockMap} from 'BlockMap';
 import type {DraftEditorModes} from 'DraftEditorModes';
-import type {DraftEditorProps} from 'DraftEditorProps';
+import type {DraftEditorProps, DraftEditorDefaultProps} from 'DraftEditorProps';
 import type {DraftScrollPosition} from 'DraftScrollPosition';
 
 const isIE = UserAgent.isBrowser('IE');
@@ -56,7 +57,7 @@ const handlerMap = {
 };
 
 type State = {
-  containerKey: number,
+  contentsKey: number,
 };
 
 /**
@@ -68,7 +69,7 @@ class DraftEditor extends React.Component {
   props: DraftEditorProps;
   state: State;
 
-  static defaultProps = {
+  static defaultProps: DraftEditorDefaultProps = {
     blockRenderMap: DefaultDraftBlockRenderMap,
     blockRendererFn: emptyFunction.thatReturnsNull,
     blockStyleFn: emptyFunction.thatReturns(''),
@@ -80,11 +81,13 @@ class DraftEditor extends React.Component {
 
   _blockSelectEvents: boolean;
   _clipboard: ?BlockMap;
-  _guardAgainstRender: boolean;
   _handler: ?Object;
   _dragCount: number;
+  _internalDrag: boolean;
   _editorKey: string;
   _placeholderAccessibilityID: string;
+  _latestEditorState: EditorState;
+  _pendingStateFromBeforeInput: void | EditorState;
 
   /**
    * Define proxies that can route events to the current handler.
@@ -114,10 +117,8 @@ class DraftEditor extends React.Component {
   blur: () => void;
   setMode: (mode: DraftEditorModes) => void;
   exitCurrentMode: () => void;
-  restoreEditorDOM: (scrollPosition: DraftScrollPosition) => void;
-  setRenderGuard: () => void;
-  removeRenderGuard: () => void;
-  setClipboard: (clipboard?: BlockMap) => void;
+  restoreEditorDOM: (scrollPosition?: DraftScrollPosition) => void;
+  setClipboard: (clipboard: ?BlockMap) => void;
   getClipboard: () => ?BlockMap;
   getEditorKey: () => string;
   update: (editorState: EditorState) => void;
@@ -129,11 +130,11 @@ class DraftEditor extends React.Component {
 
     this._blockSelectEvents = false;
     this._clipboard = null;
-    this._guardAgainstRender = false;
     this._handler = null;
     this._dragCount = 0;
     this._editorKey = generateRandomKey();
     this._placeholderAccessibilityID = 'placeholder-' + this._editorKey;
+    this._latestEditorState = props.editorState;
 
     this._onBeforeInput = this._buildHandler('onBeforeInput');
     this._onBlur = this._buildHandler('onBlur');
@@ -162,8 +163,6 @@ class DraftEditor extends React.Component {
     this.setMode = this._setMode.bind(this);
     this.exitCurrentMode = this._exitCurrentMode.bind(this);
     this.restoreEditorDOM = this._restoreEditorDOM.bind(this);
-    this.setRenderGuard = this._setRenderGuard.bind(this);
-    this.removeRenderGuard = this._removeRenderGuard.bind(this);
     this.setClipboard = this._setClipboard.bind(this);
     this.getClipboard = this._getClipboard.bind(this);
     this.getEditorKey = () => this._editorKey;
@@ -172,7 +171,7 @@ class DraftEditor extends React.Component {
     this.onDragLeave = this._onDragLeave.bind(this);
 
     // See `_restoreEditorDOM()`.
-    this.state = {containerKey: 0};
+    this.state = {contentsKey: 0};
   }
 
   /**
@@ -184,7 +183,7 @@ class DraftEditor extends React.Component {
     return (e) => {
       if (!this.props.readOnly) {
         const method = this._handler && this._handler[eventName];
-        method && method.call(this, e);
+        method && method(this, e);
       }
     };
   }
@@ -231,7 +230,6 @@ class DraftEditor extends React.Component {
         {this._renderPlaceholder()}
         <div
           className={cx('DraftEditor/editorContainer')}
-          key={'editor' + this.state.containerKey}
           ref="editorContainer">
           <div
             aria-activedescendant={
@@ -284,6 +282,7 @@ class DraftEditor extends React.Component {
               customStyleFn={this.props.customStyleFn}
               editorKey={this._editorKey}
               editorState={this.props.editorState}
+              key={'contents' + this.state.contentsKey}
             />
           </div>
         </div>
@@ -313,8 +312,9 @@ class DraftEditor extends React.Component {
    * programmatically. We only care about selection events that occur because
    * of browser interaction, not re-renders and forced selections.
    */
-  componentWillUpdate(): void {
+  componentWillUpdate(nextProps: DraftEditorProps): void {
     this._blockSelectEvents = true;
+    this._latestEditorState = nextProps.editorState;
   }
 
   componentDidUpdate(): void {
@@ -383,28 +383,16 @@ class DraftEditor extends React.Component {
   /**
    * Used via `this.restoreEditorDOM()`.
    *
-   * Force a complete re-render of the editor based on the current EditorState.
-   * This is useful when we know we are going to lose control of the DOM
-   * state (cut command, IME) and we want to make sure that reconciliation
-   * occurs on a version of the DOM that is synchronized with our EditorState.
+   * Force a complete re-render of the DraftEditorContents based on the current
+   * EditorState. This is useful when we know we are going to lose control of
+   * the DOM state (cut command, IME) and we want to make sure that
+   * reconciliation occurs on a version of the DOM that is synchronized with
+   * our EditorState.
    */
   _restoreEditorDOM(scrollPosition?: DraftScrollPosition): void {
-    this.setState({containerKey: this.state.containerKey + 1}, () => {
+    this.setState({contentsKey: this.state.contentsKey + 1}, () => {
       this._focus(scrollPosition);
     });
-  }
-
-  /**
-   * Guard against rendering. Intended for use when we need to manually
-   * reset editor contents, to ensure that no outside influences lead to
-   * React reconciliation when we are in an uncertain state.
-   */
-  _setRenderGuard(): void {
-    this._guardAgainstRender = true;
-  }
-
-  _removeRenderGuard(): void {
-    this._guardAgainstRender = false;
   }
 
   /**
@@ -435,6 +423,7 @@ class DraftEditor extends React.Component {
    * function.
    */
   _update(editorState: EditorState): void {
+    this._latestEditorState = editorState;
     this.props.onChange(editorState);
   }
 
